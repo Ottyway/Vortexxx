@@ -1,0 +1,68 @@
+plugins {
+	id 'fabric-loom' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+    // Fabric API and loader artifacts are published on Fabric Maven.
+    maven { url = 'https://maven.fabricmc.net/' }
+    mavenCentral()
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+processResources {
+	inputs.property "version", project.version
+	filesMatching("fabric.mod.json") {
+		expand "version": inputs.properties.version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+	it.options.encoding = "UTF-8"
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+}
+
+
+// Fail the build if a tiny/empty artifact is produced accidentally.
+tasks.register('verifyModJar') {
+    dependsOn tasks.named('remapJar')
+    doLast {
+        def jarFile = tasks.named('remapJar').get().archiveFile.get().asFile
+        if (!jarFile.isFile() || jarFile.length() < 10_000) {
+            throw new GradleException("Remapped mod JAR is missing or suspiciously small: ${jarFile}")
+        }
+        def zip = new java.util.zip.ZipFile(jarFile)
+        try {
+            ['fabric.mod.json', 'dev/vortex/VortexClient.class', 'vortex.mixins.json'].each { entryName ->
+                if (zip.getEntry(entryName) == null) {
+                    throw new GradleException("Required entry '${entryName}' is missing from ${jarFile.name}")
+                }
+            }
+        } finally {
+            zip.close()
+        }
+        logger.lifecycle("Verified mod JAR: ${jarFile.name} (${jarFile.length()} bytes)")
+    }
+}
+
+// Make plain `gradle build` perform the same artifact sanity checks.
+tasks.named('build') {
+    dependsOn tasks.named('verifyModJar')
+}
